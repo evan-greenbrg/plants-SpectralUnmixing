@@ -1,0 +1,25 @@
+[project]
+name = "plants-spectralunmixing"
+version = "0.1.0"
+description = "Spectral unmixing of plant spectra with SpectralUnmixing.jl via juliacall"
+readme = "README.md"
+authors = [
+    { name = "Evan Greenberg", email = "evan.greenberg@jpl.nasa.gov" },
+]
+requires-python = ">=3.13"
+dependencies = [
+    "juliacall>=0.9.37",
+    "matplotlib",
+    "numpy>=2.5.5",
+    "pandas>=3.1.1",
+    "scipy>=1.18.1",
+    "spectral>=0.26",
+]
+
+[dependency-groups]
+dev = [
+    "ipython>=9.18.1",
+]
+
+[tool.uv]
+package = false

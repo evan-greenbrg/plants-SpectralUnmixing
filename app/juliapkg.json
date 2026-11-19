@@ -1,0 +1,9 @@
+{
+  "julia": "1.11",
+  "packages": {
+    "SpectralUnmixing": {
+      "uuid": "18035c97-8b76-4bd8-9b58-2d1c7240eddc",
+      "version": "0.3"
+    }
+  }
+}

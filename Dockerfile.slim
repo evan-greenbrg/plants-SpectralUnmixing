@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV JULIA_DEPOT_PATH=/opt/julia_depot \
+    PYTHON_JULIAPKG_PROJECT=/opt/julia_env \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
+
+WORKDIR /run
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
+COPY app/ app/
+
+# Install Julia + packages from app/juliapkg.json and precompile
+RUN python -c "from juliacall import Main as jl; jl.seval('using SpectralUnmixing')"
+
+ENV PYTHON_JULIAPKG_OFFLINE=yes
+COPY data/ data/
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
