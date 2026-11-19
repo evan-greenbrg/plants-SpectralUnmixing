@@ -37,7 +37,7 @@ SENSOR_KEY_MAP = {
 # Enforce Julia data types
 JVEC_STR = lambda xs: jl.Vector[jl.String](xs)
 JVEC_INT = lambda xs: jl.Vector[jl.Int64](xs)
-JVEC_FLOAT = lambda xs: jl.Vector[jl.Float64](xs)
+JVEC_FLOAT = lambda xs: jl.Vector[jl.Float64](np.asarray(xs, dtype=np.float64))
 
 # Config matches EMIT configuration
 UNMIXING_CONFIG = dict(
@@ -140,11 +140,11 @@ def retrieve_fractional_cover(
         mr, cfr = np.asarray(mr), np.asarray(cfr)
         class_keys = list(full_el.class_valid_keys)
 
-        mod_rfl = cfr[:, :-1] @ np.asarray(full_el.spectra)
-        mod_full_rfl = full_spectrum(
-            endmember_library,
-            mod_rfl
-        )[:, good_channels]
+        # Reconstruct
+        E = np.asarray(full_el.spectra)
+        E_norm = E / np.sqrt(np.mean(E**2, axis=1, keepdims=True))
+        mod_rfl = (cfr[:, :-1] @ E_norm) * cfr[:, -1:]
+        mod_full_rfl = full_spectrum(endmember_library, mod_rfl)[:, good_channels]
 
         # 5. Parse Outputs
         # mr packaged as:
