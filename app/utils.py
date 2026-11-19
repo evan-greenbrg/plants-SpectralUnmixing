@@ -7,6 +7,8 @@ import pandas
 import numpy as np
 from spectral import envi
 
+from isofit.inversion.inverse_simple import invert_liquid_water
+
 
 def full_spectrum(lib, values):
     """Put good-band values back onto the full wavelength grid (ones elsewhere).
@@ -53,3 +55,8 @@ def calculate_rmse(spectrum, reference):
         rmse = np.sqrt(np.sum(np.where(m, (a - b) ** 2, 0.0), axis=-1) / n)
     rmse = np.where(n > 0, rmse, np.nan)
     return rmse.item() if rmse.ndim == 0 else rmse
+
+
+def calculate_ewt(args):
+    rfl, wl, ewt_detection_limit = args
+    return invert_liquid_water(rfl, wl, ewt_detection_limit=ewt_detection_limit)[0]

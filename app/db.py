@@ -91,7 +91,40 @@ def fetch_completed_pixel_ids(pixel_ids: list, job_id: str) -> set:
             return {row[0] for row in cur.fetchall()}
 
 
-def save_results(job_id: str, pixel_ids: list, result: dict):
+def save_unmixing_results(job_id: str, pixel_ids: list, result: dict):
+    """
+    TODO: This is not hooked up to the correct table. Need to find out what
+    the correct schema is.
+    """
+    # result is {"status": "success", "result": {"statevec": ..., "solution": ..., "runtime_seconds": ...}}
+    # pixel_ids must be in the same order as the pixels passed to the inversion.
+    # Keep only the surface reflectance states (RFL_*) — the rest of the state
+    # vector (H2OSTR, AOT550, aerosol fractions, …) varies with the LUT setup
+    inner = result.get("result", result)
+    rows = []
+    for i, pixel_id in enumerate(pixel_ids):
+        names = inner["statevec"][i]
+        rfl = [float(v) for n, v in zip(names, inner["solution"][i]) if n.startswith("RFL_")]
+        if not rfl:
+            raise ValueError(f"no RFL_ states in the solution for pixel {pixel_id}: {names}")
+        rows.append((pixel_id, job_id, rfl))
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            logger.info(f"Inserting {len(rows)} rows, pixel_ids={[r[0] for r in rows]}, reflectance_len={len(rows[0][1]) if rows else 0}")
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                INSERT INTO vswir_plants_staging.output_pixel_rfl (pixel_id, job_id, reflectance)
+                VALUES %s
+                ON CONFLICT (pixel_id, job_id) DO UPDATE
+                    SET reflectance = EXCLUDED.reflectance
+                """,
+                rows
+            )
+    logger.info(f"Saved {len(pixel_ids)} results for job {job_id}")
+
+
+def save_ewt_results(job_id: str, pixel_ids: list, result: dict):
     """
     TODO: This is not hooked up to the correct table. Need to find out what
     the correct schema is.

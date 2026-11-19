@@ -4,13 +4,22 @@ import logging
 from pathlib import Path
 
 from job_status import update_job_status, record_attempt_event
-from db import fetch_pixels, fetch_sensor_metadata, fetch_completed_pixel_ids, save_results
+from db import (
+    fetch_pixels,
+    fetch_sensor_metadata,
+    fetch_completed_pixel_ids,
+    save_unmixing_results,
+    save_ewt_results
+)
 from tasks import retrieve_fractional_cover, SENSOR_KEY_MAP
 from inputs import fetch_inputs 
 
 # all logger.info/error calls end up in CloudWatch automatically via Fargate
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+EWT_DETECTION_LIMIT = 0.5
 
 
 def run():
@@ -57,7 +66,7 @@ def run():
             raise ValueError(f"no pixels found in db for ids: {remaining}")
 
         # The pixel selection lambda groups jobs by (campaign, sensor, sensor_date,
-        # granule) — sensor_date picks the calibration (wavelengths, fwhm, input files)
+        # granule) — sensor_date picks the calibration (wavelengths, input files)
         campaign_name = os.environ["CAMPAIGN_NAME"]
         sensor_name   = os.environ["SENSOR_NAME"]
         sensor_date   = os.environ["SENSOR_DATE"]
@@ -68,7 +77,7 @@ def run():
                 f"Unknown sensor name '{sensor_name}'. "
                 "Add it to SENSOR_KEY_MAP in tasks.py"
             )
-        wl_raw, fwhm_raw = fetch_sensor_metadata(
+        wl_raw, _ = fetch_sensor_metadata(
             campaign_name,
             sensor_name,
             sensor_date
@@ -81,7 +90,6 @@ def run():
                 f"{len(pixels[0]['radiance'])}"
             )
         wl   = {isofit_sensor: wl_raw}
-        fwhm = {isofit_sensor: fwhm_raw}
         logger.info(f"DB wavelengths: {len(wl_raw)} bands, {wl_raw[0]:.2f}–{wl_raw[-1]:.2f} nm [{campaign_name}|{sensor_name}|{sensor_date}]")
 
         # optional input files from S3: sensors/<sensor>/<date>/ (rdn factors, noise)
@@ -111,7 +119,6 @@ def run():
         result = retrieve_fractional_cover(
             pixels,
             wl,
-            fwhm,
             sensor_name,
             rundir,
             job_id,
@@ -132,7 +139,18 @@ def run():
 
         # write results back to postgres 
         # — results are in fetch order, not request order
-        save_results(job_id, [p["pixel_id"] for p in pixels], result)
+        save_unmixing_results(
+            job_id, [p["pixel_id"] for p in pixels], result
+        )
+
+        result = retrieve_ewt(
+            pixels,
+            wl,
+            EWT_DETECTION_LIMIT,
+            rundir,
+            job_id,
+            n_cores=n_cores
+        )
 
         # final dynamo update — dashboard shows complete with total pixel count
         total = len(pixels)

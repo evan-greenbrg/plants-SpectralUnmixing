@@ -1,17 +1,25 @@
 from datetime import datetime
+from functools import partial
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 import logging
 import os
 import traceback
 
-from juliacall import Main as jl
 import numpy as np
 import pandas
 from pathlib import Path
 
+os.environ.setdefault("PYTHON_JULIACALL_THREADS", "auto")
+os.environ.setdefault("PYTHON_JULIACALL_HANDLE_SIGNALS", "yes") 
+from juliacall import Main as jl
+
 from utils import (
     full_spectrum,
     calculate_spectral_angle,
-    calculate_rmse
+    calculate_rmse,
+    calculate_ewt
+    
 )
 
 logger = logging.getLogger(__name__)
@@ -54,7 +62,6 @@ UNMIXING_CONFIG = dict(
 def retrieve_fractional_cover(
     pixels: list,
     wl,
-    fwhm,
     sensor_name: str,
     rundir: str,
     job_id: str,
@@ -76,7 +83,6 @@ def retrieve_fractional_cover(
 
         # ── Diagnostic logging ────────────────────────────────────────────
         wl_arr = wl[isofit_sensor]
-        fwhm_arr = fwhm[isofit_sensor]
 
         logger.info(
             f"wl type={type(wl_arr).__name__} "
@@ -84,13 +90,6 @@ def retrieve_fractional_cover(
             f"dtype={np.array(wl_arr).dtype} "
             f"range={wl_arr[0]:.1f}–{wl_arr[-1]:.1f} nm"
         )
-        logger.info(
-            f"fwhm type={type(fwhm_arr).__name__} "
-            f"len={len(fwhm_arr)} "
-            f"dtype={np.array(fwhm_arr).dtype} "
-            f"range={fwhm_arr[0]:.3f}–{fwhm_arr[-1]:.3f} nm"
-        )
-
 
         # Load in Library and convolve to pixel wavelengths
         endmember_library = SU.SpectralLibrary(
@@ -113,6 +112,7 @@ def retrieve_fractional_cover(
             dtype=bool
         )
         # Package pixels
+        # TODO: What does pixels look like coming out of the schema?
         rfl = np.ascontiguousarray(np.array(pixels))
 
         # TODO uncertainty
@@ -130,12 +130,9 @@ def retrieve_fractional_cover(
             class_idx
         )
         mr, mv, cfr, cfv = UB.unmix_matrix(
-            full_el,
-            rfl,
-            None,   # unc
-            class_idx,
-            options,
-            **UNMIXING_CONFIG
+            full_el, rfl, None, class_idx, options,
+            n_cores=n_cores,
+            **UNMIXING_CONFIG,
         )
         mr, cfr = np.asarray(mr), np.asarray(cfr)
         class_keys = list(full_el.class_valid_keys)
@@ -176,3 +173,44 @@ def retrieve_fractional_cover(
             "traceback": str(traceback.format_exc()),
             "error_type": type(e).__name__
         }
+
+
+def retrieve_ewt(
+    pixels: list,
+    wl: np.ndarray,
+    ewt_detection_limit: float,
+    rundir: str,
+    job_id: str,
+    n_cores: int = 1,
+):
+    try:
+        # TODO: What does pixels look like coming out of the schema?
+        rfl = np.ascontiguousarray(np.array(pixels))
+        tasks = [(r, wl, ewt_detection_limit) for r in rfl]
+
+        if n_cores <= 1:
+            solutions = [invert_pixel(t) for t in tasks]
+        else:
+            with ProcessPoolExecutor(
+                max_workers=n_cores,
+                mp_context=mp.get_context("spawn"),
+            ) as pool:
+                chunksize = max(1, len(tasks) // (n_cores * 4))
+                solutions = list(pool.map(calculate_ewt, tasks, chunksize=chunksize))
+
+        result = {
+            "equivalent_water_thickness_ewt": solutions
+        }
+
+        return {"status": "success", "result": result}
+
+    except Exception as e:
+        logger.error(f"Inversion failed: {e}")
+
+        return {
+            "status": "error",
+            "message": str(e),
+            "traceback": str(traceback.format_exc()),
+            "error_type": type(e).__name__
+        }
+
